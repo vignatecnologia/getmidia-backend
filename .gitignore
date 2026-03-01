@@ -1,0 +1,6 @@
+node_modules/
+.env
+backend_getmidia*.zip
+google_key.json
+output.txt
+uploads/
