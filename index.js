@@ -44,7 +44,8 @@ app.get('/health', async (req, res) => {
             message: 'GetMídia API is running',
             database: 'connected',
             env: {
-                DB_HOST: process.env.DB_HOST ? 'Configured' : 'Missing',
+                DB_HOST_CONFIG: process.env.DB_HOST || 'Missing',
+                ACTUAL_HOST_USED: process.env.DB_HOST === 'srv1659.hstgr.io' || process.env.DB_HOST === 'localhost' ? '127.0.0.1' : (process.env.DB_HOST || 'None'),
                 JWT_SECRET: process.env.JWT_SECRET ? 'Configured' : 'Missing'
             }
         });
@@ -52,7 +53,11 @@ app.get('/health', async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'GetMídia API is running but database connection failed',
-            error: err.message
+            error: err.message,
+            debug: {
+                DB_HOST_CONFIG: process.env.DB_HOST || 'Missing',
+                ACTUAL_HOST_USED: process.env.DB_HOST === 'srv1659.hstgr.io' || process.env.DB_HOST === 'localhost' ? '127.0.0.1' : (process.env.DB_HOST || 'None')
+            }
         });
     }
 });
