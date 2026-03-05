@@ -1,37 +1,58 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/db');
+const supabase = require('../config/supabase');
 const authMiddleware = require('../middleware/auth');
-const { v4: uuidv4 } = require('uuid');
 
 // Create Ticket
-router.post('/create', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
     const { type, description } = req.body;
-    const user_id = req.user.id;
-    const id = uuidv4();
-
     try {
-        await pool.query(
-            'INSERT INTO tickets (id, user_id, type, description, status) VALUES (?, ?, ?, ?, ?)',
-            [id, user_id, type, description, 'open']
-        );
-        res.status(201).json({ id, message: 'Ticket criado com sucesso' });
+        const { data: ticket, error } = await supabase
+            .from('tickets')
+            .insert([
+                { user_id: req.user.id, type, description }
+            ])
+            .select()
+            .single();
+
+        if (error) throw error;
+        res.status(201).json(ticket);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
-const { ADMIN_EMAILS } = require('../constants/admins');
 
+// Get My Tickets
+router.get('/my', authMiddleware, async (req, res) => {
+    try {
+        const { data: tickets, error } = await supabase
+            .from('tickets')
+            .select('*')
+            .eq('user_id', req.user.id)
+            .order('created_at', { ascending: false });
 
-// List Tickets (Admin)
+        if (error) throw error;
+        res.json(tickets);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Admin: List All Tickets
 router.get('/admin/list', authMiddleware, async (req, res) => {
+    const ADMIN_EMAILS = ['vignatecnologia@gmail.com', 'projeto.getmidia@gmail.com'];
     if (!ADMIN_EMAILS.includes(req.user.email)) {
         return res.status(403).json({ error: 'Acesso negado' });
     }
 
     try {
-        const [rows] = await pool.query('SELECT * FROM tickets ORDER BY created_at DESC');
-        res.json(rows);
+        const { data: tickets, error } = await supabase
+            .from('tickets')
+            .select('*, profiles(full_name)')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        res.json(tickets);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -39,6 +60,7 @@ router.get('/admin/list', authMiddleware, async (req, res) => {
 
 // Update Ticket Status (Admin)
 router.patch('/admin/:id', authMiddleware, async (req, res) => {
+    const ADMIN_EMAILS = ['vignatecnologia@gmail.com', 'projeto.getmidia@gmail.com'];
     if (!ADMIN_EMAILS.includes(req.user.email)) {
         return res.status(403).json({ error: 'Acesso negado' });
     }
@@ -47,7 +69,12 @@ router.patch('/admin/:id', authMiddleware, async (req, res) => {
     const { status } = req.body;
 
     try {
-        await pool.query('UPDATE tickets SET status = ? WHERE id = ?', [status, id]);
+        const { data, error } = await supabase
+            .from('tickets')
+            .update({ status })
+            .eq('id', id);
+
+        if (error) throw error;
         res.json({ message: 'Ticket atualizado com sucesso' });
     } catch (err) {
         res.status(500).json({ error: err.message });

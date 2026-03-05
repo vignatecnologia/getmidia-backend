@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const pool = require('../config/db');
+const supabase = require('../config/supabase');
 const authMiddleware = require('../middleware/auth');
 
 // Create Checkout Preference
@@ -89,11 +89,23 @@ router.post('/webhook', async (req, res) => {
                 if (userId && creditsToAdd) {
                     console.log(`✅ Approved Payment: Adding ${creditsToAdd} credits to user ${userId}`);
 
+                    // Get current credits
+                    const { data: profile, error: getError } = await supabase
+                        .from('profiles')
+                        .select('credits')
+                        .eq('id', userId)
+                        .single();
+
+                    if (getError) throw getError;
+
                     // Update credits
-                    await pool.query(
-                        'UPDATE profiles SET credits = credits + ? WHERE id = ?',
-                        [creditsToAdd, userId]
-                    );
+                    const newCredits = (profile.credits || 0) + creditsToAdd;
+                    const { error: updateError } = await supabase
+                        .from('profiles')
+                        .update({ credits: newCredits })
+                        .eq('id', userId);
+
+                    if (updateError) throw updateError;
 
                     // Handle Subscription (if plan_id exists)
                     const planId = paymentData.metadata.plan_id;
@@ -102,10 +114,17 @@ router.post('/webhook', async (req, res) => {
                         const nextMonth = new Date(now);
                         nextMonth.setDate(nextMonth.getDate() + 30);
 
-                        await pool.query(
-                            'UPDATE profiles SET plan_id = ?, subscription_status = "active", subscription_start = ?, subscription_end = ? WHERE id = ?',
-                            [planId, now, nextMonth, userId]
-                        );
+                        const { error: subError } = await supabase
+                            .from('profiles')
+                            .update({
+                                plan_id: planId,
+                                subscription_status: "active",
+                                subscription_start: now.toISOString(),
+                                current_period_end: nextMonth.toISOString()
+                            })
+                            .eq('id', userId);
+
+                        if (subError) throw subError;
                     }
                 }
             }

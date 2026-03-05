@@ -2,47 +2,35 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const pool = require('../config/db');
-const { generateToken } = require('../services/auth');
+const supabase = require('../config/supabase');
 
 // Register
 router.post('/register', async (req, res) => {
     const { email, password, full_name, phone, cpf_cnpj } = req.body;
 
     try {
-        const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
-        if (existing.length > 0) {
-            return res.status(400).json({ error: 'Usuário já existe' });
-        }
+        // 1. Sign up user in Supabase Auth
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password
+        });
 
-        const id = uuidv4();
-        const password_hash = await bcrypt.hash(password, 10);
+        if (authError) throw authError;
 
-        // Transaction for User & Profile
-        const connection = await pool.getConnection();
-        try {
-            await connection.beginTransaction();
+        const user = authData.user;
+        if (!user) throw new Error('Falha ao criar usuário');
 
-            await connection.query(
-                'INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)',
-                [id, email, password_hash]
-            );
+        // 2. Create profile in public.profiles
+        const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([
+                { id: user.id, full_name, phone, cpf_cnpj }
+            ]);
 
-            await connection.query(
-                'INSERT INTO profiles (id, full_name, phone, cpf_cnpj) VALUES (?, ?, ?, ?)',
-                [id, full_name, phone, cpf_cnpj]
-            );
+        if (profileError) throw profileError;
 
-            await connection.commit();
-
-            const token = generateToken({ id, email });
-            res.status(201).json({ user: { id, email }, token });
-        } catch (err) {
-            await connection.rollback();
-            throw err;
-        } finally {
-            connection.release();
-        }
+        const token = generateToken(user);
+        res.status(201).json({ user: { id: user.id, email: user.email }, token });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -53,27 +41,34 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        const [users] = await pool.query(`
-            SELECT u.id, u.email, u.password_hash, p.full_name 
-            FROM users u 
-            LEFT JOIN profiles p ON u.id = p.id 
-            WHERE u.email = ?
-        `, [email]);
+        // 1. Sign in with Supabase Auth
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
 
-        if (users.length === 0) {
-            return res.status(401).json({ error: 'Credenciais inválidas' });
-        }
+        if (authError) throw authError;
 
-        const user = users[0];
-        const isMatch = await bcrypt.compare(password, user.password_hash);
-        if (!isMatch) {
-            return res.status(401).json({ error: 'Credenciais inválidas' });
-        }
+        const user = authData.user;
+
+        // 2. Get profile for full_name
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', user.id)
+            .single();
 
         const token = generateToken(user);
-        res.json({ user: { id: user.id, email: user.email, full_name: user.full_name }, token });
+        res.json({
+            user: {
+                id: user.id,
+                email: user.email,
+                full_name: profile ? profile.full_name : null
+            },
+            token
+        });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(401).json({ error: 'Credenciais inválidas ou erro no servidor' });
     }
 });
 

@@ -35,17 +35,19 @@ app.use('/api/reports', reportRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check
-const pool = require('./src/config/db');
+const supabase = require('./src/config/supabase');
 app.get('/health', async (req, res) => {
     try {
-        await pool.query('SELECT 1');
+        const { data, error } = await supabase.from('profiles').select('id').limit(1);
+        if (error) throw error;
+
         res.json({
             status: 'ok',
             message: 'GetMídia API is running',
             database: 'connected',
+            provider: 'supabase',
             env: {
-                DB_HOST_CONFIG: process.env.DB_HOST || 'Missing',
-                ACTUAL_HOST_USED: process.env.DB_HOST === 'srv1659.hstgr.io' || process.env.DB_HOST === 'localhost' ? '127.0.0.1' : (process.env.DB_HOST || 'None'),
+                SUPABASE_URL: process.env.SUPABASE_URL ? 'Configured' : 'Missing',
                 JWT_SECRET: process.env.JWT_SECRET ? 'Configured' : 'Missing'
             }
         });
@@ -53,11 +55,7 @@ app.get('/health', async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'GetMídia API is running but database connection failed',
-            error: err.message,
-            debug: {
-                DB_HOST_CONFIG: process.env.DB_HOST || 'Missing',
-                ACTUAL_HOST_USED: process.env.DB_HOST === 'srv1659.hstgr.io' || process.env.DB_HOST === 'localhost' ? '127.0.0.1' : (process.env.DB_HOST || 'None')
-            }
+            error: err.message
         });
     }
 });

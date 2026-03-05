@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/db');
+const supabase = require('../config/supabase');
 const authMiddleware = require('../middleware/auth');
 const { ADMIN_EMAILS } = require('../constants/admins');
 const multer = require('multer');
@@ -31,10 +31,13 @@ const upload = multer({ storage });
 router.get('/:pageSlug', async (req, res) => {
     const { pageSlug } = req.params;
     try {
-        const [rows] = await pool.query(
-            'SELECT * FROM site_gallery_images WHERE page_slug = ? ORDER BY display_order ASC, created_at DESC',
-            [pageSlug]
-        );
+        const { data: rows, error } = await supabase
+            .from('site_gallery_images')
+            .select('*')
+            .eq('page_slug', pageSlug)
+            .order('display_order', { ascending: true });
+
+        if (error) throw error;
         res.json(rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -56,10 +59,13 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
     const imageUrl = `/uploads/site-gallery/${pageSlug}/${fileName}`;
 
     try {
-        await pool.query(
-            'INSERT INTO site_gallery_images (page_slug, image_url, title, description) VALUES (?, ?, ?, ?)',
-            [pageSlug, imageUrl, title, description]
-        );
+        const { error } = await supabase
+            .from('site_gallery_images')
+            .insert([
+                { page_slug: pageSlug, image_url: imageUrl, title, description }
+            ]);
+
+        if (error) throw error;
         res.json({ message: 'Imagem adicionada com sucesso', imageUrl });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -76,10 +82,12 @@ router.patch('/:id', authMiddleware, async (req, res) => {
     const { title, description } = req.body;
 
     try {
-        await pool.query(
-            'UPDATE site_gallery_images SET title = ?, description = ? WHERE id = ?',
-            [title, description, id]
-        );
+        const { error } = await supabase
+            .from('site_gallery_images')
+            .update({ title, description })
+            .eq('id', id);
+
+        if (error) throw error;
         res.json({ message: 'Imagem atualizada com sucesso' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -97,22 +105,15 @@ router.post('/update-order', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Dados inválidos' });
     }
 
-    const connection = await pool.getConnection();
     try {
-        await connection.beginTransaction();
-        for (const u of updates) {
-            await connection.query(
-                'UPDATE site_gallery_images SET display_order = ? WHERE id = ?',
-                [u.display_order, u.id]
-            );
-        }
-        await connection.commit();
+        const { error } = await supabase
+            .from('site_gallery_images')
+            .upsert(updates, { onConflict: 'id' });
+
+        if (error) throw error;
         res.json({ message: 'Ordem atualizada com sucesso' });
     } catch (err) {
-        await connection.rollback();
         res.status(500).json({ error: err.message });
-    } finally {
-        connection.release();
     }
 });
 
@@ -124,16 +125,23 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     const { id } = req.params;
     try {
-        const [rows] = await pool.query('SELECT image_url FROM site_gallery_images WHERE id = ?', [id]);
-        if (rows.length > 0) {
-            // image_url is like /uploads/site-gallery/...
-            // We need to map this to the actual filesystem path
+        const { data: rows, error: getError } = await supabase
+            .from('site_gallery_images')
+            .select('image_url')
+            .eq('id', id);
+
+        if (!getError && rows.length > 0) {
             const relativePath = rows[0].image_url;
             const filePath = path.join(__dirname, '..', '..', relativePath.replace(/^\//, ''));
             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         }
 
-        await pool.query('DELETE FROM site_gallery_images WHERE id = ?', [id]);
+        const { error: deleteError } = await supabase
+            .from('site_gallery_images')
+            .delete()
+            .eq('id', id);
+
+        if (deleteError) throw deleteError;
         res.json({ message: 'Imagem excluída com sucesso' });
     } catch (err) {
         res.status(500).json({ error: err.message });

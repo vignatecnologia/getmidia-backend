@@ -3,7 +3,7 @@ const router = express.Router();
 const { GoogleAuth } = require('google-auth-library');
 const axios = require('axios');
 const authMiddleware = require('../middleware/auth');
-const pool = require('../config/db');
+const supabase = require('../config/supabase');
 
 async function getAccessToken() {
     const auth = new GoogleAuth({
@@ -20,8 +20,13 @@ router.post('/generate-image', authMiddleware, async (req, res) => {
 
     try {
         // 1. Check credits
-        const [profiles] = await pool.query('SELECT credits FROM profiles WHERE id = ?', [req.user.id]);
-        if (profiles.length === 0 || profiles[0].credits <= 0) {
+        const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('credits')
+            .eq('id', req.user.id)
+            .single();
+
+        if (profileError || !profile || profile.credits <= 0) {
             return res.status(403).json({ error: 'Créditos insuficientes' });
         }
 
@@ -82,7 +87,10 @@ router.post('/generate-image', authMiddleware, async (req, res) => {
         });
 
         // 4. Deduct credit
-        await pool.query('UPDATE profiles SET credits = credits - 1 WHERE id = ?', [req.user.id]);
+        await supabase
+            .from('profiles')
+            .update({ credits: profile.credits - 1 })
+            .eq('id', req.user.id);
 
         res.json(response.data);
 
