@@ -4,7 +4,7 @@ const path = require('path');
 
 async function initDb() {
     try {
-        const schemaPath = 'C:\\Users\\julio\\.gemini\\antigravity\\brain\\e0f440ea-65c7-48d0-b285-829a03ba957b\\mysql_schema.sql';
+        const schemaPath = path.join(__dirname, '..', 'schema.sql');
         const schema = fs.readFileSync(schemaPath, 'utf8');
 
         // Split SQL statements by ';' but handle cases where ';' is inside strings if needed
